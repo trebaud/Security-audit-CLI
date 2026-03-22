@@ -1,4 +1,4 @@
-module port-checker
+module sec-audit
 
 go 1.24.0
 
