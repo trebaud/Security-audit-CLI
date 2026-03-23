@@ -227,16 +227,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			return m.resetAndRerun()
 
-		// Cursor navigation — move between rows, then scroll viewport to follow.
+		// Cursor navigation — move between rows, re-render so the ▶ indicator
+		// moves, then scroll the viewport to keep the selected row visible.
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
+				m.viewport.SetContent(m.renderList())
 				m.scrollToCursor()
 			}
 
 		case "down", "j":
 			if m.cursor < len(m.tasks)-1 {
 				m.cursor++
+				m.viewport.SetContent(m.renderList())
 				m.scrollToCursor()
 			}
 
