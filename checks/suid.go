@@ -170,6 +170,11 @@ func (c *SUIDCheck) Run() Task {
 	}
 
 	if len(unexpected) > 0 {
+		// Strip the "[!]     " prefix for clean JSON output.
+		jsonLines := make([]string, len(unexpected))
+		for i, u := range unexpected {
+			jsonLines[i] = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(u), "[!]"))
+		}
 		return Task{
 			ID:          c.ID(),
 			Name:        "SUID/SGID",
@@ -177,6 +182,7 @@ func (c *SUIDCheck) Run() Task {
 			Status:      StatusWarn,
 			Message:     fmt.Sprintf("%d unexpected SUID/SGID binary(ies)", len(unexpected)),
 			Details:     details,
+			JSONDetails: strings.Join(jsonLines, "\n"),
 		}
 	}
 

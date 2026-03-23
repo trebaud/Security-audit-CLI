@@ -33,6 +33,7 @@ package checks
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // StickyBitCheck verifies that world-writable temporary directories have the
@@ -114,6 +115,10 @@ func (c *StickyBitCheck) Run() Task {
 		"  Verify with: ls -ld /tmp  (look for 't' at the end, e.g. drwxrwxrwt)",
 	)
 
+	fixLines := make([]string, len(fails))
+	for i, d := range fails {
+		fixLines[i] = d + " (missing sticky bit) | Fix: chmod +t " + d
+	}
 	return Task{
 		ID:          c.ID(),
 		Name:        "Sticky Bit",
@@ -121,5 +126,6 @@ func (c *StickyBitCheck) Run() Task {
 		Status:      StatusFail,
 		Message:     fmt.Sprintf("%d dir(s) missing sticky bit: %v", len(fails), fails),
 		Details:     details,
+		JSONDetails: strings.Join(fixLines, "\n"),
 	}
 }

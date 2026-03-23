@@ -76,6 +76,7 @@ func (c *FirewallCheck) Run() Task {
 				"  Enable ufw:     ufw enable",
 				"  Allow SSH first: ufw allow ssh  (to avoid locking yourself out)",
 			},
+			JSONDetails: "ufw installed but inactive\nFix: ufw allow ssh && ufw enable",
 		}
 	}
 
@@ -106,15 +107,8 @@ func (c *FirewallCheck) Run() Task {
 			Description: "Verify a firewall is active",
 			Status:      StatusWarn,
 			Message:     "nftables present but ruleset is empty",
-			Details: []string{
-				"  WHY IT MATTERS",
-				"  nft is installed but has no rules — no filtering is active.",
-				"  All listening ports are exposed to the network.",
-				"",
-				"  REMEDIATION",
-				"  Define rules in /etc/nftables.conf and enable the service:",
-				"    systemctl enable --now nftables",
-			},
+			Details:     []string{"  Fix: define rules in /etc/nftables.conf"},
+			JSONDetails: "nftables installed but ruleset is empty\nFix: define rules in /etc/nftables.conf && systemctl enable --now nftables",
 		}
 	}
 
@@ -157,16 +151,8 @@ func (c *FirewallCheck) Run() Task {
 			Description: "Verify a firewall is active",
 			Status:      StatusWarn,
 			Message:     "iptables present but no rules defined",
-			Details: []string{
-				"  WHY IT MATTERS",
-				"  iptables is available but all chains use the default ACCEPT policy",
-				"  with no rules. This means all traffic passes through unchecked.",
-				"",
-				"  REMEDIATION",
-				"  Option A (recommended): install ufw and run 'ufw enable'",
-				"  Option B: write iptables rules manually, then persist with:",
-				"    iptables-save > /etc/iptables/rules.v4",
-			},
+			Details:     []string{"  All chains use default ACCEPT policy with no rules", "  Fix: add iptables rules or install ufw/nftables"},
+			JSONDetails: "iptables installed but all chains use default ACCEPT — no rules active\nFix: add iptables rules or install ufw/nftables",
 		}
 	}
 
@@ -189,6 +175,7 @@ func (c *FirewallCheck) Run() Task {
 			"  Debian/Ubuntu:  apt install ufw && ufw allow ssh && ufw enable",
 			"  RHEL/Fedora:    dnf install firewalld && systemctl enable --now firewalld",
 		},
+		JSONDetails: "No firewall active (probed: ufw, nftables, iptables)\nFix (Debian/Ubuntu): apt install ufw && ufw allow ssh && ufw enable\nFix (RHEL/Fedora): dnf install firewalld && systemctl enable --now firewalld",
 	}
 }
 

@@ -152,6 +152,21 @@ func (c *SSHCheck) Run() Task {
 		}
 	}
 
+	// Build compact JSON details: one line per finding with its fix.
+	var jsonLines []string
+	for _, d := range sshDirectives {
+		for _, line := range strings.Split(string(data), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+				continue
+			}
+			parts := strings.Fields(trimmed)
+			if len(parts) >= 2 && strings.EqualFold(parts[0], d.pattern) && strings.EqualFold(parts[1], d.badValue) {
+				jsonLines = append(jsonLines, fmt.Sprintf("[%s] %s: %s | Fix: %s", d.severity, d.pattern, trimmed, d.fix))
+			}
+		}
+	}
+
 	// Prepend a context header before the per-finding detail lines.
 	header := []string{
 		"  WHY IT MATTERS",
@@ -170,5 +185,6 @@ func (c *SSHCheck) Run() Task {
 		Status:      worstStatus,
 		Message:     fmt.Sprintf("%d insecure directive(s) found", len(issues)),
 		Details:     details,
+		JSONDetails: strings.Join(jsonLines, "\n"),
 	}
 }

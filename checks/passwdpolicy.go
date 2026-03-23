@@ -178,5 +178,6 @@ func (c *PasswordPolicyCheck) Run() Task {
 		Status:      StatusWarn,
 		Message:     fmt.Sprintf("%d weak setting(s): %s", len(issues), strings.Join(issues, ", ")),
 		Details:     fullDetails,
+		JSONDetails: strings.Join(issues, "\n") + "\nFix: edit /etc/login.defs",
 	}
 }

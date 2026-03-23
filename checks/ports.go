@@ -20,6 +20,7 @@ package checks
 
 import (
 	"fmt"
+	"strings"
 
 	psnet "github.com/shirou/gopsutil/v3/net"
 )
@@ -43,6 +44,8 @@ func (c *PortsCheck) Run() Task {
 	}
 
 	// Collect only sockets in LISTEN state (i.e. servers waiting for connections).
+	// portLines holds the raw data lines reused for JSONDetails.
+	var portLines []string
 	var details []string
 	listenCount := 0
 	for _, conn := range conns {
@@ -56,13 +59,13 @@ func (c *PortsCheck) Run() Task {
 		if conn.Type == 2 {
 			proto = "udp"
 		}
-		details = append(details,
-			fmt.Sprintf("  %-6s  local=%-22s  pid=%d",
-				proto,
-				fmt.Sprintf("%s:%d", conn.Laddr.IP, conn.Laddr.Port),
-				conn.Pid,
-			),
+		line := fmt.Sprintf("%-6s  local=%-22s  pid=%d",
+			proto,
+			fmt.Sprintf("%s:%d", conn.Laddr.IP, conn.Laddr.Port),
+			conn.Pid,
 		)
+		portLines = append(portLines, line)
+		details = append(details, "  "+line)
 	}
 
 	status := StatusPass
@@ -103,5 +106,6 @@ func (c *PortsCheck) Run() Task {
 		Status:      status,
 		Message:     message,
 		Details:     details,
+		JSONDetails: strings.Join(portLines, "\n"),
 	}
 }

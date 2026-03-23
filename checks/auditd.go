@@ -91,6 +91,7 @@ func (c *AuditdCheck) Run() Task {
 			"  REMEDIATION",
 			"  Start and enable auditd:  systemctl enable --now auditd",
 		}
+		base.JSONDetails = "auditd state: " + state + "\nFix: systemctl enable --now auditd"
 		return base
 	}
 
@@ -127,5 +128,6 @@ func (c *AuditdCheck) Run() Task {
 		"    -w /etc/shadow   -p wa -k identity",
 		"    -w /etc/sudoers  -p wa -k privilege_escalation",
 	}
+	base.JSONDetails = "auditd not installed or not running\nFix (Debian/Ubuntu): apt install auditd && systemctl enable --now auditd\nFix (RHEL/Fedora): dnf install audit && systemctl enable --now auditd"
 	return base
 }

@@ -65,9 +65,16 @@ var cursorStyle = lipgloss.NewStyle(). //nolint:unused
 					Foreground(lipgloss.Color("230")).
 					Bold(true)
 
-// detailStyle: soft blue — expanded detail lines shown below a selected row.
+// detailStyle: soft blue — expanded data lines (paths, values, commands).
 var detailStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("111"))
+
+// explanatoryStyle: italic dark grey — prose/header lines inside expanded
+// detail panels (WHY IT MATTERS sections, descriptive sentences, etc.).
+// Visually distinguished from the actual findings data lines.
+var explanatoryStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("241")).
+	Italic(true)
 
 // --- Footer & overlays ---
 
@@ -90,3 +97,17 @@ var summaryCountWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bol
 var summaryCountFail = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
 var summaryCountCrit = lipgloss.NewStyle().Foreground(lipgloss.Color("201")).Bold(true)
 var summaryCountSkip = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+
+// --- Loading screen ---
+
+// tickStyle: green check mark for completed checks in the loading view.
+var tickStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+
+// loadingNameStyle: dim text for check names in the loading list.
+var loadingNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+// loadingDoneStyle: slightly dimmer for completed check names.
+var loadingDoneStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+
+// progressStyle: renders the "N / M checks complete" counter.
+var progressStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Italic(true)

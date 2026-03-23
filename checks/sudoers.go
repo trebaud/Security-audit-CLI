@@ -120,5 +120,6 @@ func (c *SudoersCheck) Run() Task {
 		Status:      StatusFail,
 		Message:     fmt.Sprintf("%d NOPASSWD rule(s) found", len(hits)),
 		Details:     details,
+		JSONDetails: strings.Join(hits, "\n"),
 	}
 }

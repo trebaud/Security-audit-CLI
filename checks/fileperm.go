@@ -101,5 +101,6 @@ func (c *FilePermCheck) Run() Task {
 		Status:      StatusFail,
 		Message:     fmt.Sprintf("%d world-writable file(s) in /etc", len(files)),
 		Details:     details,
+		JSONDetails: strings.Join(files, "\n"),
 	}
 }

@@ -96,6 +96,7 @@ func (c *ASLRCheck) Run() Task {
 				"  Persistent: echo 'kernel.randomize_va_space=2' >> /etc/sysctl.conf",
 				"              sysctl -p",
 			},
+			JSONDetails: path + " = 1 (heap not randomized)\nFix: echo 2 > " + path,
 		}
 	default:
 		return Task{
@@ -118,6 +119,7 @@ func (c *ASLRCheck) Run() Task {
 				"  Persistent: echo 'kernel.randomize_va_space=2' >> /etc/sysctl.conf",
 				"              sysctl -p",
 			},
+			JSONDetails: path + " = " + value + " (disabled)\nFix: echo 2 > " + path,
 		}
 	}
 }

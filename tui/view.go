@@ -25,6 +25,9 @@ func (m Model) View() string {
 	if !m.ready {
 		return "\n  Initializing…\n"
 	}
+	if m.loading {
+		return m.loadingView()
+	}
 	if m.showHelp {
 		return m.helpView()
 	}
@@ -42,24 +45,65 @@ func (m Model) View() string {
 	sb.WriteString("\n")
 
 	// Fixed footer
-	hint := "↑/↓ navigate  Enter expand/collapse  R re-run  ? help  Q quit"
-	if !m.allDone() {
-		hint = "running checks…  ↑/↓ navigate  Q quit"
+	sb.WriteString(helpStyle.Render("↑/↓ navigate  Enter expand/collapse  R re-run  ? help  Q quit"))
+
+	return sb.String()
+}
+
+// loadingView renders the loading screen shown while checks are running.
+// It shows only a spinner, a progress bar, and a counter — no check names,
+// no badges, nothing that resembles the results list. The results list
+// appears in one clean swap when the final check completes.
+func (m Model) loadingView() string {
+	done := 0
+	for _, t := range m.tasks {
+		if t.Status != checks.StatusRunning {
+			done++
+		}
 	}
-	sb.WriteString(helpStyle.Render(hint))
+	total := len(m.tasks)
+
+	var sb strings.Builder
+
+	sb.WriteString(titleStyle.Render("  SYSTEM SECURITY AUDIT  "))
+	sb.WriteString("\n\n")
+
+	// Spinner + label
+	sb.WriteString(fmt.Sprintf("  %s  Running security checks…\n\n",
+		runningStyle.Render(m.spinner.View())))
+
+	// ASCII progress bar — filled with █, empty with ░, fixed 30 chars wide.
+	const barWidth = 30
+	filled := 0
+	if total > 0 {
+		filled = (done * barWidth) / total
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	sb.WriteString(fmt.Sprintf("  %s  %s\n\n",
+		runningStyle.Render(bar),
+		progressStyle.Render(fmt.Sprintf("%d / %d", done, total)),
+	))
+
+	// Footer — only quit is active during loading
+	sb.WriteString(helpStyle.Render("  Q  quit"))
 
 	return sb.String()
 }
 
 // renderList builds the full string content loaded into the viewport.
-// Each task renders as 3 lines when collapsed, more when expanded.
+// Tasks are rendered in severity order (CRIT/FAIL → WARN → PASS/SKIP),
+// but only once all checks have finished to avoid rows jumping during loading.
 func (m Model) renderList() string {
 	var sb strings.Builder
 
-	for i, t := range m.tasks {
-		// Cursor indicator: ▶ on selected row, two spaces otherwise.
+	indexes := m.sortedIndexes()
+
+	for rank, i := range indexes {
+		t := m.tasks[i]
+
+		// Cursor indicator: ▶ on selected row (cursor tracks display rank).
 		cursor := "  "
-		if i == m.cursor {
+		if rank == m.cursor {
 			cursor = cursorStyle.Render("▶ ")
 		}
 
@@ -86,10 +130,15 @@ func (m Model) renderList() string {
 		sb.WriteString(descStyle.Render("      "+t.Description) + "\n")
 
 		// Rows 3+: detail lines, only when expanded.
+		// Each line is styled based on whether it is explanatory prose or data.
 		if m.expanded[i] && len(t.Details) > 0 {
 			sb.WriteString("\n")
 			for _, d := range t.Details {
-				sb.WriteString(detailStyle.Render(d) + "\n")
+				if isExplanatoryLine(d) {
+					sb.WriteString(explanatoryStyle.Render(d) + "\n")
+				} else {
+					sb.WriteString(detailStyle.Render(d) + "\n")
+				}
 			}
 		}
 
@@ -98,6 +147,70 @@ func (m Model) renderList() string {
 	}
 
 	return sb.String()
+}
+
+// isExplanatoryLine reports whether a detail line is prose/explanatory text
+// (styled italic grey) vs. a data line (path, command, status flag, value).
+//
+// Data lines are identified by concrete markers:
+//   - Start with [ — status badges like [OK], [FAIL], [WARN]
+//   - Start with / — absolute file/dir paths
+//   - Start with Fix: / sudo / echo / chmod / apt / dnf / systemctl — commands
+//   - Start with a digit — counts, port numbers, version strings
+//   - Contain  key=value  or  key: value  patterns (findings)
+//
+// Everything else is considered explanatory prose.
+func isExplanatoryLine(line string) bool {
+	t := strings.TrimSpace(line)
+	if t == "" {
+		return true // blank lines use explanatory style (invisible either way)
+	}
+
+	// Known data-line prefixes.
+	dataPrefixes := []string{
+		"[",            // [OK], [FAIL], [WARN], [CRIT], [!]
+		"/",            // absolute paths
+		"Fix:", "fix:", // remediation commands
+		"sudo ", "echo ", "chmod ", // shell commands
+		"apt ", "apt-get ", "dnf ", // package manager commands
+		"systemctl ", "service ", // service management
+		"usermod ", "userdel ", // user management
+		"visudo", "chage ", // auth tools
+		"ufw ", "iptables ", "nft ", // firewall commands
+		"sysctl ",              // kernel param commands
+		"ausearch", "aureport", // audit tools
+		"history ", "history -", // history commands
+		"HISTCONTROL",  // shell variable
+		"tcp ", "udp ", // port listing lines
+		"running:", "newest ", // kernel update data
+		"auditd ", // auditd findings
+	}
+	for _, p := range dataPrefixes {
+		if strings.HasPrefix(t, p) {
+			return false
+		}
+	}
+
+	// Lines with key=value (e.g. PASS_MAX_DAYS=99999) are data.
+	if strings.Contains(t, "=") && !strings.Contains(t, " = ") {
+		return false
+	}
+
+	// Lines that start with a digit are data (counts, ports, versions).
+	if len(t) > 0 && t[0] >= '0' && t[0] <= '9' {
+		return false
+	}
+
+	// Lines referencing a file:linenum pattern (e.g. /home/user/.bash_history:148).
+	if strings.Contains(t, ":") {
+		parts := strings.SplitN(t, ":", 2)
+		if len(parts[0]) > 0 && (parts[0][0] == '/' || strings.HasSuffix(parts[0], "history") || strings.HasSuffix(parts[0], "sudoers")) {
+			return false
+		}
+	}
+
+	// Everything else is explanatory prose.
+	return true
 }
 
 // summaryBar renders the aggregate status counts line.

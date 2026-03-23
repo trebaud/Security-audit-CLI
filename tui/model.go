@@ -9,6 +9,7 @@ package tui
 
 import (
 	"sec-audit/checks"
+	"sort"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -29,10 +30,16 @@ type tickMsg time.Time
 type Model struct {
 	tasks       []checks.Task  // one per check; starts as StatusRunning stubs
 	checksToRun []checks.Check // original check list, kept for re-run
-	cursor      int            // index of the currently selected row
-	expanded    map[int]bool   // which rows have their detail panel open
+	cursor      int            // index of the currently selected row (display rank)
+	expanded    map[int]bool   // which rows have their detail panel open (keyed by task index)
 	quitting    bool           // true after q/Ctrl+C → renders quit screen
 	showHelp    bool           // true while the ? help overlay is shown
+
+	// loading is true while at least one check is still running.
+	// During loading, the loading screen is shown instead of the task list.
+	// This prevents the unsorted-then-sorted flash: the list is never shown
+	// until all results are in and sorted order is stable.
+	loading bool
 
 	spinner  spinner.Model
 	viewport viewport.Model
@@ -63,6 +70,7 @@ func New(checksToRun []checks.Check) Model {
 		checksToRun: checksToRun,
 		expanded:    make(map[int]bool),
 		spinner:     sp,
+		loading:     true, // show loading screen until all checks finish
 	}
 }
 
@@ -79,6 +87,13 @@ func placeholderName(c checks.Check) string {
 		"auditd":       "Auditd",
 		"passwdpolicy": "Passwd Policy",
 		"stickybit":    "Sticky Bit",
+		"secupdates":   "Sec Updates",
+		"kernelupdate": "Kernel",
+		"passwdfile":   "Auth Files",
+		"sudol":        "Sudo -l",
+		"shellhistory": "Shell History",
+		"writablepath": "PATH Hijack",
+		"cron":         "Cron Jobs",
 	}
 	if n, ok := names[c.ID()]; ok {
 		return n
@@ -99,6 +114,13 @@ func placeholderDesc(c checks.Check) string {
 		"auditd":       "Linux audit daemon status",
 		"passwdpolicy": "Password aging and length policy",
 		"stickybit":    "Sticky bit on world-writable dirs",
+		"secupdates":   "Pending security updates in package manager",
+		"kernelupdate": "Running kernel vs latest installed version",
+		"passwdfile":   "/etc/passwd & /etc/shadow permissions and content",
+		"sudol":        "Current user's sudo privileges",
+		"shellhistory": "Shell history files for embedded credentials",
+		"writablepath": "World-writable directories in $PATH",
+		"cron":         "Writable scripts in system cron jobs",
 	}
 	if d, ok := descs[c.ID()]; ok {
 		return d
@@ -143,33 +165,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Width = m.width
 			m.viewport.Height = vpHeight
 		}
-		m.viewport.SetContent(m.renderList())
-		m.scrollToCursor()
-
-	// checkResultMsg: a check finished — replace its RUNNING stub.
-	case checkResultMsg:
-		m.tasks[msg.index] = msg.task
-		if m.ready {
+		// Only write content into the viewport once all results are in and
+		// sorted order is stable. During loading we size the viewport but leave
+		// it empty — writing partial results here causes a one-frame unsorted
+		// flash when loading flips to false a moment later.
+		if !m.loading {
 			m.viewport.SetContent(m.renderList())
 			m.scrollToCursor()
 		}
 
+	// checkResultMsg: a check finished — replace its RUNNING stub.
+	case checkResultMsg:
+		m.tasks[msg.index] = msg.task
+
+		if m.allDone() {
+			m.loading = false
+			m.cursor = 0
+			m.expanded = make(map[int]bool)
+			if m.ready {
+				// Viewport exists — populate it with the fully sorted list now,
+				// before loading flips so there is zero chance of a stale frame.
+				m.viewport.SetContent(m.renderList())
+				m.viewport.SetYOffset(0)
+			}
+			// If !m.ready the viewport hasn't been created yet. The upcoming
+			// WindowSizeMsg will call SetContent at that point (loading is
+			// already false so it will take the !m.loading branch above).
+		}
+
 	// spinner.TickMsg: advance the spinner animation frame.
-	// Re-render the list so the spinner dots update, but preserve the cursor.
+	// During loading the spinner is rendered directly in loadingView() so no
+	// viewport update is needed. After loading it is no longer ticking.
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		cmds = append(cmds, cmd)
-		if m.ready {
-			// Save scroll position before SetContent (it does NOT reset YOffset
-			// unless content shrinks past it, but be explicit for clarity).
-			saved := m.viewport.YOffset
-			m.viewport.SetContent(m.renderList())
-			m.viewport.SetYOffset(saved)
-		}
 
 	// KeyMsg: keyboard input.
 	case tea.KeyMsg:
+		// Help overlay: any key dismisses it.
 		if m.showHelp {
 			m.showHelp = false
 			return m, nil
@@ -178,7 +212,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			m.quitting = true
 			return m, tea.Quit
+		}
 
+		// All keys below are only active once the results list is shown.
+		// During loading, only q/ctrl+c is accepted (handled above).
+		if m.loading {
+			break
+		}
+
+		switch msg.String() {
 		case "?":
 			m.showHelp = true
 
@@ -200,7 +242,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Toggle the detail panel on the currently selected row.
 		case "enter", " ":
-			m.expanded[m.cursor] = !m.expanded[m.cursor]
+			indexes := m.sortedIndexes()
+			taskIdx := indexes[m.cursor]
+			m.expanded[taskIdx] = !m.expanded[taskIdx]
 			if m.ready {
 				m.viewport.SetContent(m.renderList())
 				m.scrollToCursor()
@@ -212,26 +256,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // rowTopLine returns the line index (0-based) within the rendered list where
-// task i begins. Collapsed tasks take 3 lines; expanded tasks take 3 + 1 +
-// len(Details) lines (the +1 is the blank separator before detail lines).
-func (m Model) rowTopLine(i int) int {
+// display rank `rank` begins. Uses sortedIndexes so it matches renderList.
+func (m Model) rowTopLine(rank int) int {
+	indexes := m.sortedIndexes()
 	line := 0
-	for j := 0; j < i; j++ {
-		line += m.taskHeight(j)
+	for r := 0; r < rank; r++ {
+		line += m.taskHeight(indexes[r])
 	}
 	return line
 }
 
-// taskHeight returns the number of rendered lines occupied by task i.
-func (m Model) taskHeight(i int) int {
-	if i < 0 || i >= len(m.tasks) {
+// taskHeight returns the number of rendered lines occupied by task at taskIdx.
+func (m Model) taskHeight(taskIdx int) int {
+	if taskIdx < 0 || taskIdx >= len(m.tasks) {
 		return 0
 	}
 	// Base: 1 (badge+name row) + 1 (description row) + 1 (blank separator)
 	h := 3
-	if m.expanded[i] && len(m.tasks[i].Details) > 0 {
+	if m.expanded[taskIdx] && len(m.tasks[taskIdx].Details) > 0 {
 		// 1 blank line before details + N detail lines
-		h += 1 + len(m.tasks[i].Details)
+		h += 1 + len(m.tasks[taskIdx].Details)
 	}
 	return h
 }
@@ -243,14 +287,13 @@ func (m *Model) scrollToCursor() {
 	if !m.ready {
 		return
 	}
+	indexes := m.sortedIndexes()
 	top := m.rowTopLine(m.cursor)
-	bottom := top + m.taskHeight(m.cursor) - 1
+	bottom := top + m.taskHeight(indexes[m.cursor]) - 1
 
 	if top < m.viewport.YOffset {
-		// Cursor row is above the visible area — scroll up to it.
 		m.viewport.SetYOffset(top)
 	} else if bottom >= m.viewport.YOffset+m.viewport.Height {
-		// Cursor row's last line is below the visible area — scroll down.
 		m.viewport.SetYOffset(bottom - m.viewport.Height + 1)
 	}
 }
@@ -264,8 +307,8 @@ func (m Model) resetAndRerun() (tea.Model, tea.Cmd) {
 	}
 	m.expanded = make(map[int]bool)
 	m.cursor = 0
+	m.loading = true // show loading screen again during re-run
 	if m.ready {
-		m.viewport.SetContent(m.renderList())
 		m.viewport.SetYOffset(0)
 	}
 	return m, m.Init()
@@ -279,4 +322,27 @@ func (m Model) allDone() bool {
 		}
 	}
 	return true
+}
+
+// sortedIndexes returns task indexes in display order:
+// CRIT → FAIL → WARN → SKIP → PASS, stable within each group.
+// This is only ever called after loading is complete (all checks done),
+// so no guard for the running state is needed.
+func (m Model) sortedIndexes() []int {
+	indexes := make([]int, len(m.tasks))
+	for i := range indexes {
+		indexes[i] = i
+	}
+	severity := map[string]int{
+		checks.StatusCritical: 0,
+		checks.StatusFail:     1,
+		checks.StatusWarn:     2,
+		checks.StatusSkipped:  3,
+		checks.StatusPass:     4,
+		checks.StatusRunning:  5,
+	}
+	sort.SliceStable(indexes, func(a, b int) bool {
+		return severity[m.tasks[indexes[a]].Status] < severity[m.tasks[indexes[b]].Status]
+	})
+	return indexes
 }

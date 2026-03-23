@@ -62,6 +62,12 @@ type Task struct {
 	//   - Why it matters (security context / threat model)
 	//   - How to fix it
 	Details []string
+
+	// JSONDetails is a compact string used exclusively in JSON report output.
+	// It should contain only raw findings data: affected paths, values, and
+	// fix commands — no explanatory prose, no section headers, no [OK] lines.
+	// Empty string is valid for PASS results where Message is self-sufficient.
+	JSONDetails string
 }
 
 // Check is the interface every security check must implement. Implementations
@@ -78,19 +84,26 @@ type Check interface {
 }
 
 // All returns every registered check in the order they appear in the TUI.
-// The ordering is roughly: network → auth → filesystem → kernel → services.
+// The ordering is roughly: network → auth → filesystem → kernel → services → updates.
 func All() []Check {
 	return []Check{
-		&PortsCheck{},          // network: listening services
-		&SSHCheck{},            // auth: SSH daemon hardening
-		&FilePermCheck{},       // filesystem: world-writable /etc files
-		&ASLRCheck{},           // kernel: memory layout randomization
-		&SudoersCheck{},        // auth: passwordless privilege escalation
-		&FirewallCheck{},       // network: packet filtering
-		&SUIDCheck{},           // filesystem: setuid/setgid binaries
-		&AuditdCheck{},         // services: kernel audit logging
-		&PasswordPolicyCheck{}, // auth: password aging & complexity
-		&StickyBitCheck{},      // filesystem: temp directory protections
+		&PortsCheck{},           // network: listening services
+		&SSHCheck{},             // auth: SSH daemon hardening
+		&FilePermCheck{},        // filesystem: world-writable /etc files
+		&ASLRCheck{},            // kernel: memory layout randomization
+		&SudoersCheck{},         // auth: passwordless privilege escalation
+		&FirewallCheck{},        // network: packet filtering
+		&SUIDCheck{},            // filesystem: setuid/setgid binaries
+		&AuditdCheck{},          // services: kernel audit logging
+		&PasswordPolicyCheck{},  // auth: password aging & complexity
+		&StickyBitCheck{},       // filesystem: temp directory protections
+		&SecurityUpdatesCheck{}, // updates: pending security patches
+		&KernelUpdateCheck{},    // updates: running vs installed kernel
+		&PasswdFileCheck{},      // auth: UID-0 accounts, shadow perms, empty passwords
+		&SudoLCheck{},           // auth: current user's live sudo privileges
+		&ShellHistoryCheck{},    // auth: credential patterns in shell history
+		&WritablePathCheck{},    // filesystem: world-writable dirs in $PATH
+		&CronCheck{},            // filesystem: writable scripts in system cron jobs
 	}
 }
 
